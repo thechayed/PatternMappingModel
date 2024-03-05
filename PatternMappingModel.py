@@ -240,18 +240,6 @@ for i in range(10):
 correct_predictions = 0
 total_predictions = len(dataset)
 
-# for i in range(100):
-#     correct_predictions = 0
-#     accuracy = 1
-
-#     for input_data, expected_output in dataset.items():
-#         predicted_output = model.inference(input_data)
-#         expected_output = integer_to_bits(expected_output)
-#         expected_output = np.pad(expected_output, (0, len(predicted_output) - len(expected_output)), mode='constant')
-#         accuracy = lerp(accuracy, 1 - (np.abs(np.mean(predicted_output - expected_output))), 1/(2 ** output_size))
-
-# print("Accuracy:", round(accuracy * 100), "%")
-
 print(bits_to_integer(model.inference(2)))
 
 #Train until we get the value 25 for the input 5
@@ -259,7 +247,7 @@ print(bits_to_integer(model.inference(2)))
 power_reached = False
 while not power_reached:
     predicted = bits_to_integer(model.inference(5))
-    model.punish(5, abs(25 - predicted))
+    model.punish(5, abs(25 - predicted) * 3)
     print(bits_to_integer(model.inference(5)))
 
     power_reached = predicted == 25
