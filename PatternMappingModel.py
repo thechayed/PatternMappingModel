@@ -45,6 +45,7 @@ def bits_to_integer(bits):
 
 def subtract_bits_by_floats(integer, floats_array):
     integer_bits = integer_to_bits(integer)
+    floats_array = integer_to_bits(floats_array)
     # floats_to_int = bits_to_integer(np.int16(floats_array))
 
     first = np.pad(np.array(integer_bits, dtype=np.float16), (0, max(len(floats_array) - len(integer_bits), 0)), mode='constant')
@@ -92,6 +93,18 @@ def random_partition(total_value, num_elements):
 
     return partition
 
+def normalize(array):
+    max = 0.0
+
+    for element in array:
+        if element > max:
+            max = element
+    
+    for element in range(len(array)):
+        array[element] = array[element]/max
+
+    return array
+
 # Example usage
 
 class PatternMappingModel:
@@ -123,22 +136,26 @@ class PatternMappingModel:
             self.input_perturbation_map[input_combination] = np.zeros(self.output_size)
 
     def inference(self, input):
-        input_index = None
+        input_index = bits_to_integer(input)
+        input_bits = integer_to_bits(input)
 
-        if is_integer(input):
-            input_index = input
-        if is_list(input):
-            input_index = bits_to_integer(input)
+        similar_inputs = self.get_closest_inputs(input_index)
+        similarity_scores = np.zeros(3)
 
+        for i in range(3):
+            similarity_scores[i] = subtract_bits_by_floats(similar_inputs[i], input_bits)
+
+        similarity_scores= normalize(similarity_scores)    
+        
         merged_output = np.zeros(self.output_size, dtype=np.float16)
-
-        # Merge the Final Output Weights
-        outputs_weights_normalized = self.normalize_input(input_index)
-        for output in outputs_weights_normalized.keys():
-            output_bits = integer_to_bits(output)
-            output_bits = np.pad(integer_to_bits(output), (0, len(merged_output) - len(output_bits)), mode='constant')
-            for bit in range(len(output_bits)):
-                merged_output[bit] = lerp(merged_output[bit], output_bits[bit], outputs_weights_normalized[output])
+        for i in range(3):
+            # Merge the Final Output Weights
+            outputs_weights_normalized = self.normalize_input(similar_inputs[i])
+            for output in outputs_weights_normalized.keys():
+                output_bits = integer_to_bits(output)
+                output_bits = np.pad(integer_to_bits(output), (0, len(merged_output) - len(output_bits)), mode='constant')
+                for bit in range(len(output_bits)):
+                    merged_output[bit] = lerp(merged_output[bit], lerp(merged_output[bit], output_bits[bit] * 10 - 5, outputs_weights_normalized[output]), (1-min(similarity_scores[i]*10, 1))**2)
 
         for j in range(len(merged_output)):
             merged_output[j] = sigmoid(merged_output[j] + self.input_perturbation_map[input_index][j]) 
@@ -149,10 +166,10 @@ class PatternMappingModel:
         input_index = bits_to_integer(input)
         output_index = bits_to_integer(output)
 
-        sorted_inputs = self.get_closest_inputs(input_index)
+        similar_inputs = self.get_closest_inputs(input_index)
 
-        for i in range(len(sorted_inputs)-1):
-            self.inference_map[sorted_inputs[i]][output_index] += (self.appraisal_strength * power * scoring_falloff ** i) + random.uniform(-self.mutation_rate, self.mutation_rate)
+        for i in range(len(similar_inputs)-1):
+            self.inference_map[similar_inputs[i]][output_index] += (self.appraisal_strength * power * scoring_falloff ** i) + random.uniform(-self.mutation_rate, self.mutation_rate)
 
     # Creates Perturbations to the Inferred Output Calculation, based on the amount of error that is present in the output
     def punish(self, input, power):
@@ -167,7 +184,7 @@ class PatternMappingModel:
         for i in partitioned_error:
             i = sigmoid(i)
 
-        self.input_perturbation_map[input_index] += partitioned_error
+        self.input_perturbation_map[input_index] = partitioned_error
 
 
     # Normalizes the Weighted Relationships of the Outputs associated with the given Input
@@ -192,7 +209,7 @@ class PatternMappingModel:
         sorted_inputs = np.zeros(2 ** self.input_size, dtype=np.float16)
 
         for row_index in range(self.inference_map.shape[0]):
-            similarity_scores[row_index][0] = np.mean(subtract_bits_by_floats(row_index, integer_to_bits(input_index)))
+            similarity_scores[row_index][0] = np.mean(subtract_bits_by_floats(row_index, input_index))
             similarity_scores[row_index][1] = row_index
 
         # Get the indices that would sort similarity_scores
@@ -230,7 +247,7 @@ dataset = {
 }
 
 # Train the model
-for i in range(10):
+for i in range(100):
     model.train(dataset)
 
 # Evaluate the model on the test dataset
@@ -244,7 +261,8 @@ print(bits_to_integer(model.inference(2)))
 power_reached = False
 while not power_reached:
     predicted = bits_to_integer(model.inference(5))
-    model.punish(5, abs(25 - predicted) * 3)
+    model.punish(5, abs(25 - predicted) * 10)
+    predicted = bits_to_integer(model.inference(5))
     print(bits_to_integer(model.inference(5)))
 
     power_reached = predicted == 25
