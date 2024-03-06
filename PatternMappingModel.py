@@ -2,8 +2,8 @@ import random
 import numpy as np
 import math
 
-def is_integer(variable):
-    return isinstance(variable, int)
+def is_number(variable):
+    return isinstance(variable, int) | isinstance(variable, float) | isinstance(variable, np.int64) | isinstance(variable, np.int32)
 
 # Check if a variable is a list
 def is_list(variable):
@@ -35,7 +35,7 @@ def integer_to_bits(integer):
     return bits
 
 def bits_to_integer(bits):
-    if is_integer(bits):
+    if is_number(bits):
         return bits
     result = 0
     reversed = bits[::-1]
@@ -46,12 +46,15 @@ def bits_to_integer(bits):
 def subtract_bits_by_floats(integer, floats_array):
     integer_bits = integer_to_bits(integer)
     floats_array = integer_to_bits(floats_array)
+
+    integer_index = bits_to_integer(integer)
+    floats_index = bits_to_integer(floats_array)
     # floats_to_int = bits_to_integer(np.int16(floats_array))
 
     first = np.pad(np.array(integer_bits, dtype=np.float16), (0, max(len(floats_array) - len(integer_bits), 0)), mode='constant')
     second = np.pad(np.array(floats_array, dtype=np.float16), (0, max(len(integer_bits) - len(floats_array), 0)), mode='constant')
 
-    return (np.abs(np.mean(np.subtract(first, second)))+0.01) * (abs(integer - bits_to_integer(np.int16(floats_array))) ** 5) * ((np.abs(np.mean(first) - np.mean(second))+0.01)**2)
+    return (np.abs(np.mean(np.subtract(first, second)))+0.01) * (abs(integer_index - floats_index) ** 5) * ((np.abs(np.mean(first) - np.mean(second))+0.01)**2)
 
 def bubble_by_score(array_to_sort, scores_and_indices, descending):
     isSorted = False
@@ -84,7 +87,7 @@ def random_partition(total_value, num_elements):
 
     for _ in range(num_elements - 1):
         # Generate a random value for the current element
-        element =  random.uniform(-random.uniform(0, remaining_value),random.uniform(0, remaining_value))
+        element =  random.uniform(-remaining_value,remaining_value)
         partition.append(element)
         remaining_value -= abs(-element)
 
@@ -129,11 +132,20 @@ class PatternMappingModel:
 
             for output_combination in range(self.output_combinations):
                 self.inference_map[input_combination][output_combination] = random.uniform(0.0,1.0)
+
+        # How far from the best error value to go before correcting to the best error value
+        self.perturbation_correction_threshold = 10
+        self.best_perturbation_error = 100
         
         # Stores factors for each input, that are multiplied into the value gathered from the Inference Map on Inference
         self.input_perturbation_map = np.empty((self.input_combinations), dtype=object)
         for input_combination in range(self.input_combinations):
-            self.input_perturbation_map[input_combination] = np.zeros(self.output_size)
+            self.input_perturbation_map[input_combination] = np.empty((2), dtype=object)
+            # Current
+            self.input_perturbation_map[input_combination][0] = np.zeros(self.output_size)
+            # Closest
+            self.input_perturbation_map[input_combination][1] = np.zeros(self.output_size)
+
 
     def inference(self, input):
         input_index = bits_to_integer(input)
@@ -158,7 +170,7 @@ class PatternMappingModel:
                     merged_output[bit] = lerp(merged_output[bit], lerp(merged_output[bit], output_bits[bit] * 10 - 5, outputs_weights_normalized[output]), (1-min(similarity_scores[i]*10, 1))**2)
 
         for j in range(len(merged_output)):
-            merged_output[j] = sigmoid(merged_output[j] + self.input_perturbation_map[input_index][j]) 
+            merged_output[j] = sigmoid(merged_output[j] + self.input_perturbation_map[input_index][0][j]) 
 
         return merged_output
 
@@ -173,18 +185,18 @@ class PatternMappingModel:
 
     # Creates Perturbations to the Inferred Output Calculation, based on the amount of error that is present in the output
     def punish(self, input, power):
-        input_index = None
-        output_bits = None
-        
         input_index = bits_to_integer(input)
+        
+        if abs(power) < abs(self.best_perturbation_error):
+            self.input_perturbation_map[input_index][1] = self.input_perturbation_map[input_index][0]
+            self.best_perturbation_error = power
 
-        error = power * self.punishment_strength
-        partitioned_error = random_partition(error, self.input_size)
+        partitioned_error = random_partition(power * self.punishment_strength, self.input_size)
 
-        for i in partitioned_error:
-            i = sigmoid(i)
+        for i in range(len(partitioned_error)):
+            partitioned_error[i] = lerp(lerp(self.input_perturbation_map[input_index][0][i], partitioned_error[i], 0.1), self.input_perturbation_map[input_index][1][i], 0.25)
 
-        self.input_perturbation_map[input_index] = partitioned_error
+        self.input_perturbation_map[input_index][0] = partitioned_error
 
 
     # Normalizes the Weighted Relationships of the Outputs associated with the given Input
@@ -225,13 +237,13 @@ class PatternMappingModel:
             self.praise(input, output,1)
 
 # Example usage
-input_size = 5
-output_size = 5
+input_size = 6
+output_size = 6
 scoring_falloff = 0.15
 mutation_rate = 0.2
 precision = 3
 appraisal_strength = 1
-punishment_strength = 1
+punishment_strength = 2
 
 model = PatternMappingModel(input_size, output_size, scoring_falloff, precision, mutation_rate, appraisal_strength, punishment_strength)
 
@@ -242,7 +254,8 @@ dataset = {
     1: 1,
     2: 4,
     3: 9,
-    4: 16
+    4: 16,
+    6: 36
     # Add more data as needed
 }
 
@@ -261,7 +274,7 @@ print(bits_to_integer(model.inference(2)))
 power_reached = False
 while not power_reached:
     predicted = bits_to_integer(model.inference(5))
-    model.punish(5, abs(25 - predicted) * 10)
+    model.punish(5, (25-predicted)*2)
     predicted = bits_to_integer(model.inference(5))
     print(bits_to_integer(model.inference(5)))
 
