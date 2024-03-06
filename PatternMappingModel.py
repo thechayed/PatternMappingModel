@@ -1,6 +1,5 @@
 import random
 import numpy as np
-import pickle
 import math
 
 def is_integer(variable):
@@ -17,6 +16,8 @@ def lerp(a, b, t):
     return a * (1 - t) + b * t
 
 def integer_to_bits(integer):
+    if is_list(integer):
+        return integer
     bits = []
 
     integer = int(integer)
@@ -34,6 +35,8 @@ def integer_to_bits(integer):
     return bits
 
 def bits_to_integer(bits):
+    if is_integer(bits):
+        return bits
     result = 0
     reversed = bits[::-1]
     for bit in reversed:
@@ -143,32 +146,10 @@ class PatternMappingModel:
         return merged_output
 
     def praise(self, input, output, power):
-        input_index = None
-        output_bits = None
-        
-        if is_integer(input):
-            input_index = input
-        if is_list(input):
-            input_index = bits_to_integer(input)
+        input_index = bits_to_integer(input)
+        output_index = bits_to_integer(output)
 
-        if is_integer(output):
-            output_index = output
-        if is_list(output):
-            output_index = bits_to_integer(output)
-
-        # Calculate similarity scores between input_combination and all other input combinations
-        similarity_scores = np.zeros((2 ** self.input_size, 2), dtype=np.float16)
-        sorted_inputs = np.zeros(2 ** self.input_size, dtype=np.float16)
-
-        for row_index in range(self.inference_map.shape[0]):
-            similarity_scores[row_index][0] = np.mean(subtract_bits_by_floats(row_index, integer_to_bits(input_index)))
-            similarity_scores[row_index][1] = row_index
-
-        # Get the indices that would sort similarity_scores
-        sorted_inputs = np.array(similarity_scores[:,1], dtype=int)
-
-        # Bubble sort the inputs based on their similarity scores
-        bubble_by_score(sorted_inputs, similarity_scores, True)
+        sorted_inputs = self.get_closest_inputs(input_index)
 
         for i in range(len(sorted_inputs)-1):
             self.inference_map[sorted_inputs[i]][output_index] += (self.appraisal_strength * power * scoring_falloff ** i) + random.uniform(-self.mutation_rate, self.mutation_rate)
@@ -178,10 +159,7 @@ class PatternMappingModel:
         input_index = None
         output_bits = None
         
-        if is_integer(input):
-            input_index = input
-        if is_list(input):
-            input_index = bits_to_integer(input)
+        input_index = bits_to_integer(input)
 
         error = power * self.punishment_strength
         partitioned_error = random_partition(error, self.input_size)
@@ -205,6 +183,25 @@ class PatternMappingModel:
             normalized[output_index] = (self.inference_map[input][output_index]/max_weight) ** 10
 
         return normalized
+    
+    def get_closest_inputs(self, input):
+        input_index = bits_to_integer(input)
+        
+        # Calculate similarity scores between input_combination and all other input combinations
+        similarity_scores = np.zeros((2 ** self.input_size, 2), dtype=np.float16)
+        sorted_inputs = np.zeros(2 ** self.input_size, dtype=np.float16)
+
+        for row_index in range(self.inference_map.shape[0]):
+            similarity_scores[row_index][0] = np.mean(subtract_bits_by_floats(row_index, integer_to_bits(input_index)))
+            similarity_scores[row_index][1] = row_index
+
+        # Get the indices that would sort similarity_scores
+        sorted_inputs = np.array(similarity_scores[:,1], dtype=int)
+
+        # Bubble sort the inputs based on their similarity scores
+        bubble_by_score(sorted_inputs, similarity_scores, True)
+
+        return sorted_inputs
 
     def train(self, dataset):
         for input, output in dataset.items():
